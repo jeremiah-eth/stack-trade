@@ -194,3 +194,69 @@
         (ok tokens-out)
     )
 )
+
+;; Buy NO tokens
+(define-public (buy-no (market-id uint) (amount uint))
+    (let
+        (
+            (market-data (unwrap! (map-get? markets market-id) (err u404)))
+            (pool-data (unwrap! (map-get? market-pools market-id) (err u404)))
+            (user-data (default-to {yes-balance: u0, no-balance: u0} (map-get? user-positions {market-id: market-id, user: tx-sender})))
+            
+            ;; Fee calculation (2%)
+            (fee (/ (* amount u2) u100))
+            (net-amount (- amount fee))
+            
+            ;; Pool state
+            (yes-pool (get yes-pool pool-data))
+            (no-pool (get no-pool pool-data))
+            
+            ;; CPMM Calculation
+            ;; Mint `net-amount` YES and NO tokens
+            ;; Swap `net-amount` YES tokens for NO tokens
+            ;; dy = no_pool - (no_pool * yes_pool) / (yes_pool + net_amount)
+            (dy (- no-pool (/ (* no-pool yes-pool) (+ yes-pool net-amount))))
+            (tokens-out (+ net-amount dy))
+        )
+        ;; Checks
+        (asserts! (is-eq (get status market-data) STATUS-ACTIVE) (err u403))
+        
+        ;; Transfer STX
+        (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
+        
+        ;; Update Maps
+        
+        ;; 1. Update Pools
+        ;; no-pool decreases by dy (gave out NO)
+        ;; yes-pool increases by net-amount (received YES from mint stake)
+        (map-set market-pools market-id
+            (merge pool-data {
+                yes-pool: (+ yes-pool net-amount),
+                no-pool: (- no-pool dy),
+                total-no-tokens: (+ (get total-no-tokens pool-data) net-amount)
+            })
+        )
+        
+        ;; 2. Update User Position
+        (map-set user-positions {market-id: market-id, user: tx-sender}
+            (merge user-data {
+                no-balance: (+ (get no-balance user-data) tokens-out)
+            })
+        )
+        
+        ;; 3. Update Stats
+        (let
+            (
+                (stats (default-to {volume: u0, tx-count: u0} (map-get? market-stats market-id)))
+            )
+            (map-set market-stats market-id
+                {
+                    volume: (+ (get volume stats) amount),
+                    tx-count: (+ (get tx-count stats) u1)
+                }
+            )
+        )
+        
+        (ok tokens-out)
+    )
+)
