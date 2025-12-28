@@ -20,6 +20,7 @@
 ;; Error codes
 (define-constant ERR-INVALID-QUESTION (err u100))
 (define-constant ERR-INVALID-DATE (err u101))
+(define-constant ERR-INVALID-AMOUNT (err u102))
 
 ;; ============================================
 ;; DATA STRUCTURES
@@ -93,7 +94,7 @@
         ;; Validations
         (asserts! (> (len question) u0) ERR-INVALID-QUESTION)
         ;; Resolution date must be in the future (using block height)
-        (asserts! (> resolution-date block-height) ERR-INVALID-DATE)
+        (asserts! (> resolution-date stacks-block-height) ERR-INVALID-DATE)
 
         ;; Create market
         (map-insert markets new-id {
@@ -102,7 +103,7 @@
             resolution-date: resolution-date,
             status: STATUS-ACTIVE,
             outcome: none,
-            created-at: block-height,
+            created-at: stacks-block-height,
         })
 
         ;; Transfer initial liquidity (20 STX) from creator
@@ -130,21 +131,28 @@
 )
 
 ;; Buy YES tokens
-(define-public (buy-yes (market-id uint) (amount uint))
-    (let
-        (
+(define-public (buy-yes
+        (market-id uint)
+        (amount uint)
+    )
+    (let (
             (market-data (unwrap! (map-get? markets market-id) (err u404)))
             (pool-data (unwrap! (map-get? market-pools market-id) (err u404)))
-            (user-data (default-to {yes-balance: u0, no-balance: u0} (map-get? user-positions {market-id: market-id, user: tx-sender})))
-            
+            (user-data (default-to {
+                yes-balance: u0,
+                no-balance: u0,
+            }
+                (map-get? user-positions {
+                    market-id: market-id,
+                    user: tx-sender,
+                })
+            ))
             ;; Fee calculation (2%)
             (fee (/ (* amount u2) u100))
             (net-amount (- amount fee))
-            
             ;; Pool state
             (yes-pool (get yes-pool pool-data))
             (no-pool (get no-pool pool-data))
-            
             ;; CPMM Calculation
             ;; Mint `net-amount` YES and NO tokens
             ;; Swap `net-amount` NO tokens for YES tokens
@@ -154,12 +162,13 @@
         )
         ;; Checks
         (asserts! (is-eq (get status market-data) STATUS-ACTIVE) (err u403))
-        
+        (asserts! (> amount u0) ERR-INVALID-AMOUNT)
+
         ;; Transfer STX
         (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
-        
+
         ;; Update Maps
-        
+
         ;; 1. Update Pools
         ;; yes-pool decreases by dy (gave out YES)
         ;; no-pool increases by net-amount (received NO from mint stake)
@@ -167,50 +176,58 @@
             (merge pool-data {
                 yes-pool: (- yes-pool dy),
                 no-pool: (+ no-pool net-amount),
-                total-yes-tokens: (+ (get total-yes-tokens pool-data) net-amount)
+                total-yes-tokens: (+ (get total-yes-tokens pool-data) net-amount),
             })
         )
-        
+
         ;; 2. Update User Position
-        (map-set user-positions {market-id: market-id, user: tx-sender}
-            (merge user-data {
-                yes-balance: (+ (get yes-balance user-data) tokens-out)
+        (map-set user-positions {
+            market-id: market-id,
+            user: tx-sender,
+        }
+            (merge user-data { yes-balance: (+ (get yes-balance user-data) tokens-out) })
+        )
+
+        ;; 3. Update Stats
+        (let ((stats (default-to {
+                volume: u0,
+                tx-count: u0,
+            }
+                (map-get? market-stats market-id)
+            )))
+            (map-set market-stats market-id {
+                volume: (+ (get volume stats) amount),
+                tx-count: (+ (get tx-count stats) u1),
             })
         )
-        
-        ;; 3. Update Stats
-        (let
-            (
-                (stats (default-to {volume: u0, tx-count: u0} (map-get? market-stats market-id)))
-            )
-            (map-set market-stats market-id
-                {
-                    volume: (+ (get volume stats) amount),
-                    tx-count: (+ (get tx-count stats) u1)
-                }
-            )
-        )
-        
+
         (ok tokens-out)
     )
 )
 
 ;; Buy NO tokens
-(define-public (buy-no (market-id uint) (amount uint))
-    (let
-        (
+(define-public (buy-no
+        (market-id uint)
+        (amount uint)
+    )
+    (let (
             (market-data (unwrap! (map-get? markets market-id) (err u404)))
             (pool-data (unwrap! (map-get? market-pools market-id) (err u404)))
-            (user-data (default-to {yes-balance: u0, no-balance: u0} (map-get? user-positions {market-id: market-id, user: tx-sender})))
-            
+            (user-data (default-to {
+                yes-balance: u0,
+                no-balance: u0,
+            }
+                (map-get? user-positions {
+                    market-id: market-id,
+                    user: tx-sender,
+                })
+            ))
             ;; Fee calculation (2%)
             (fee (/ (* amount u2) u100))
             (net-amount (- amount fee))
-            
             ;; Pool state
             (yes-pool (get yes-pool pool-data))
             (no-pool (get no-pool pool-data))
-            
             ;; CPMM Calculation
             ;; Mint `net-amount` YES and NO tokens
             ;; Swap `net-amount` YES tokens for NO tokens
@@ -220,12 +237,13 @@
         )
         ;; Checks
         (asserts! (is-eq (get status market-data) STATUS-ACTIVE) (err u403))
-        
+        (asserts! (> amount u0) ERR-INVALID-AMOUNT)
+
         ;; Transfer STX
         (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
-        
+
         ;; Update Maps
-        
+
         ;; 1. Update Pools
         ;; no-pool decreases by dy (gave out NO)
         ;; yes-pool increases by net-amount (received YES from mint stake)
@@ -233,55 +251,60 @@
             (merge pool-data {
                 yes-pool: (+ yes-pool net-amount),
                 no-pool: (- no-pool dy),
-                total-no-tokens: (+ (get total-no-tokens pool-data) net-amount)
+                total-no-tokens: (+ (get total-no-tokens pool-data) net-amount),
             })
         )
-        
+
         ;; 2. Update User Position
-        (map-set user-positions {market-id: market-id, user: tx-sender}
-            (merge user-data {
-                no-balance: (+ (get no-balance user-data) tokens-out)
+        (map-set user-positions {
+            market-id: market-id,
+            user: tx-sender,
+        }
+            (merge user-data { no-balance: (+ (get no-balance user-data) tokens-out) })
+        )
+
+        ;; 3. Update Stats
+        (let ((stats (default-to {
+                volume: u0,
+                tx-count: u0,
+            }
+                (map-get? market-stats market-id)
+            )))
+            (map-set market-stats market-id {
+                volume: (+ (get volume stats) amount),
+                tx-count: (+ (get tx-count stats) u1),
             })
         )
-        
-        ;; 3. Update Stats
-        (let
-            (
-                (stats (default-to {volume: u0, tx-count: u0} (map-get? market-stats market-id)))
-            )
-            (map-set market-stats market-id
-                {
-                    volume: (+ (get volume stats) amount),
-                    tx-count: (+ (get tx-count stats) u1)
-                }
-            )
-        )
-        
+
         (ok tokens-out)
     )
 )
 
 ;; Resolve market (Creator only)
-(define-public (resolve-market (market-id uint) (outcome uint))
-    (let
-        (
-            (market-data (unwrap! (map-get? markets market-id) (err u404)))
-        )
+(define-public (resolve-market
+        (market-id uint)
+        (outcome uint)
+    )
+    (let ((market-data (unwrap! (map-get? markets market-id) (err u404))))
         ;; Checks
         ;; 1. Only creator can resolve (or contract owner if needed)
         (asserts! (is-eq tx-sender (get creator market-data)) (err u401))
         ;; 2. Market must be active
         (asserts! (is-eq (get status market-data) STATUS-ACTIVE) (err u403))
         ;; 3. Resolution date must be reached
-        (asserts! (>= block-height (get resolution-date market-data)) (err u405))
+        (asserts! (>= stacks-block-height (get resolution-date market-data))
+            (err u405)
+        )
         ;; 4. Valid outcome
-        (asserts! (or (is-eq outcome OUTCOME-YES) (is-eq outcome OUTCOME-NO)) (err u400))
-        
+        (asserts! (or (is-eq outcome OUTCOME-YES) (is-eq outcome OUTCOME-NO))
+            (err u400)
+        )
+
         ;; Update market status
         (map-set markets market-id
             (merge market-data {
                 status: STATUS-RESOLVED,
-                outcome: (some outcome)
+                outcome: (some outcome),
             })
         )
         (ok true)
@@ -290,35 +313,41 @@
 
 ;; Claim winnings
 (define-public (claim-winnings (market-id uint))
-    (let
-        (
+    (let (
             (market-data (unwrap! (map-get? markets market-id) (err u404)))
-            (user-data (unwrap! (map-get? user-positions {market-id: market-id, user: tx-sender}) (err u404)))
+            (user-data (unwrap!
+                (map-get? user-positions {
+                    market-id: market-id,
+                    user: tx-sender,
+                })
+                (err u404)
+            ))
             (outcome (unwrap! (get outcome market-data) (err u400)))
             (claimer tx-sender)
         )
         ;; Checks
         ;; 1. Market must be resolved
         (asserts! (is-eq (get status market-data) STATUS-RESOLVED) (err u403))
-        
+
         ;; 2. Determine winning amount
-        (let
-            (
-                (winning-amount (if (is-eq outcome OUTCOME-YES)
-                                    (get yes-balance user-data)
-                                    (get no-balance user-data)))
-            )
+        (let ((winning-amount (if (is-eq outcome OUTCOME-YES)
+                (get yes-balance user-data)
+                (get no-balance user-data)
+            )))
             ;; 3. Must have winnings
             (asserts! (> winning-amount u0) (err u404))
-            
+
             ;; 4. Update user position to 0 to prevent double claim
-            (map-set user-positions {market-id: market-id, user: claimer}
+            (map-set user-positions {
+                market-id: market-id,
+                user: claimer,
+            }
                 (merge user-data {
                     yes-balance: u0,
-                    no-balance: u0
+                    no-balance: u0,
                 })
             )
-            
+
             ;; 5. Transfer STX
             (as-contract (stx-transfer? winning-amount tx-sender claimer))
         )
@@ -345,6 +374,12 @@
 )
 
 ;; Get user positions
-(define-read-only (get-user-position (market-id uint) (user principal))
-    (ok (map-get? user-positions {market-id: market-id, user: user}))
+(define-read-only (get-user-position
+        (market-id uint)
+        (user principal)
+    )
+    (ok (map-get? user-positions {
+        market-id: market-id,
+        user: user,
+    }))
 )
