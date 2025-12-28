@@ -105,12 +105,15 @@
             created-at: block-height,
         })
 
-        ;; Initialize market pool
+        ;; Transfer initial liquidity (20 STX) from creator
+        (try! (stx-transfer? u20000000 tx-sender (as-contract tx-sender)))
+
+        ;; Initialize market pool with 10 STX worth of YES and NO
         (map-insert market-pools new-id {
-            yes-pool: u0,
-            no-pool: u0,
-            total-yes-tokens: u0,
-            total-no-tokens: u0,
+            yes-pool: u10000000,
+            no-pool: u10000000,
+            total-yes-tokens: u10000000,
+            total-no-tokens: u10000000,
         })
 
         ;; Initialize market stats
@@ -123,5 +126,71 @@
         (var-set market-counter new-id)
 
         (ok new-id)
+    )
+)
+
+;; Buy YES tokens
+(define-public (buy-yes (market-id uint) (amount uint))
+    (let
+        (
+            (market-data (unwrap! (map-get? markets market-id) (err u404)))
+            (pool-data (unwrap! (map-get? market-pools market-id) (err u404)))
+            (user-data (default-to {yes-balance: u0, no-balance: u0} (map-get? user-positions {market-id: market-id, user: tx-sender})))
+            
+            ;; Fee calculation (2%)
+            (fee (/ (* amount u2) u100))
+            (net-amount (- amount fee))
+            
+            ;; Pool state
+            (yes-pool (get yes-pool pool-data))
+            (no-pool (get no-pool pool-data))
+            
+            ;; CPMM Calculation
+            ;; Mint `net-amount` YES and NO tokens
+            ;; Swap `net-amount` NO tokens for YES tokens
+            ;; dy = yes_pool - (yes_pool * no_pool) / (no_pool + net_amount)
+            (dy (- yes-pool (/ (* yes-pool no-pool) (+ no-pool net-amount))))
+            (tokens-out (+ net-amount dy))
+        )
+        ;; Checks
+        (asserts! (is-eq (get status market-data) STATUS-ACTIVE) (err u403))
+        
+        ;; Transfer STX
+        (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
+        
+        ;; Update Maps
+        
+        ;; 1. Update Pools
+        ;; yes-pool decreases by dy (gave out YES)
+        ;; no-pool increases by net-amount (received NO from mint stake)
+        (map-set market-pools market-id
+            (merge pool-data {
+                yes-pool: (- yes-pool dy),
+                no-pool: (+ no-pool net-amount),
+                total-yes-tokens: (+ (get total-yes-tokens pool-data) net-amount)
+            })
+        )
+        
+        ;; 2. Update User Position
+        (map-set user-positions {market-id: market-id, user: tx-sender}
+            (merge user-data {
+                yes-balance: (+ (get yes-balance user-data) tokens-out)
+            })
+        )
+        
+        ;; 3. Update Stats
+        (let
+            (
+                (stats (default-to {volume: u0, tx-count: u0} (map-get? market-stats market-id)))
+            )
+            (map-set market-stats market-id
+                {
+                    volume: (+ (get volume stats) amount),
+                    tx-count: (+ (get tx-count stats) u1)
+                }
+            )
+        )
+        
+        (ok tokens-out)
     )
 )
