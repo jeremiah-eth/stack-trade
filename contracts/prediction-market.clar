@@ -110,6 +110,7 @@
         })
 
         ;; Transfer initial liquidity (20 STX) from creator
+        ;; Transfer initial liquidity (20 STX) from creator
         (try! (stx-transfer? u20000000 tx-sender tx-sender))
 
         ;; Initialize market pool with 10 STX worth of YES and NO
