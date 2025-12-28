@@ -324,3 +324,27 @@
         )
     )
 )
+
+;; ============================================
+;; READ-ONLY FUNCTIONS
+;; ============================================
+
+;; Get market data
+(define-read-only (get-market-info (market-id uint))
+    (ok (map-get? markets market-id))
+)
+
+;; Get market pool data
+(define-read-only (get-market-pool (market-id uint))
+    (ok (map-get? market-pools market-id))
+)
+
+;; Get market stats
+(define-read-only (get-market-stats (market-id uint))
+    (ok (map-get? market-stats market-id))
+)
+
+;; Get user positions
+(define-read-only (get-user-position (market-id uint) (user principal))
+    (ok (map-get? user-positions {market-id: market-id, user: user}))
+)
