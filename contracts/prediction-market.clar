@@ -287,3 +287,40 @@
         (ok true)
     )
 )
+
+;; Claim winnings
+(define-public (claim-winnings (market-id uint))
+    (let
+        (
+            (market-data (unwrap! (map-get? markets market-id) (err u404)))
+            (user-data (unwrap! (map-get? user-positions {market-id: market-id, user: tx-sender}) (err u404)))
+            (outcome (unwrap! (get outcome market-data) (err u400)))
+            (claimer tx-sender)
+        )
+        ;; Checks
+        ;; 1. Market must be resolved
+        (asserts! (is-eq (get status market-data) STATUS-RESOLVED) (err u403))
+        
+        ;; 2. Determine winning amount
+        (let
+            (
+                (winning-amount (if (is-eq outcome OUTCOME-YES)
+                                    (get yes-balance user-data)
+                                    (get no-balance user-data)))
+            )
+            ;; 3. Must have winnings
+            (asserts! (> winning-amount u0) (err u404))
+            
+            ;; 4. Update user position to 0 to prevent double claim
+            (map-set user-positions {market-id: market-id, user: claimer}
+                (merge user-data {
+                    yes-balance: u0,
+                    no-balance: u0
+                })
+            )
+            
+            ;; 5. Transfer STX
+            (as-contract (stx-transfer? winning-amount tx-sender claimer))
+        )
+    )
+)
