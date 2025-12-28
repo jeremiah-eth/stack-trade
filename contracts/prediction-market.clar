@@ -260,3 +260,30 @@
         (ok tokens-out)
     )
 )
+
+;; Resolve market (Creator only)
+(define-public (resolve-market (market-id uint) (outcome uint))
+    (let
+        (
+            (market-data (unwrap! (map-get? markets market-id) (err u404)))
+        )
+        ;; Checks
+        ;; 1. Only creator can resolve (or contract owner if needed)
+        (asserts! (is-eq tx-sender (get creator market-data)) (err u401))
+        ;; 2. Market must be active
+        (asserts! (is-eq (get status market-data) STATUS-ACTIVE) (err u403))
+        ;; 3. Resolution date must be reached
+        (asserts! (>= block-height (get resolution-date market-data)) (err u405))
+        ;; 4. Valid outcome
+        (asserts! (or (is-eq outcome OUTCOME-YES) (is-eq outcome OUTCOME-NO)) (err u400))
+        
+        ;; Update market status
+        (map-set markets market-id
+            (merge market-data {
+                status: STATUS-RESOLVED,
+                outcome: (some outcome)
+            })
+        )
+        (ok true)
+    )
+)
