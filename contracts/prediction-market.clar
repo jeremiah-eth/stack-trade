@@ -17,6 +17,10 @@
 ;; Contract owner
 (define-constant CONTRACT-OWNER tx-sender)
 
+;; Error codes
+(define-constant ERR-INVALID-QUESTION (err u100))
+(define-constant ERR-INVALID-DATE (err u101))
+
 ;; ============================================
 ;; DATA STRUCTURES
 ;; ============================================
@@ -33,7 +37,7 @@
         resolution-date: uint,
         status: uint,
         outcome: (optional uint),
-        created-at: uint
+        created-at: uint,
     }
 )
 
@@ -44,7 +48,7 @@
         yes-pool: uint,
         no-pool: uint,
         total-yes-tokens: uint,
-        total-no-tokens: uint
+        total-no-tokens: uint,
     }
 )
 
@@ -54,3 +58,43 @@
 
 ;; Initialize contract with market counter at 0
 ;; Markets will start from ID 1
+
+;; ============================================
+;; PUBLIC FUNCTIONS
+;; ============================================
+
+;; Create a new prediction market
+(define-public (create-market (question (string-ascii 256)) (resolution-date uint))
+    (let
+        (
+            (new-id (+ (var-get market-counter) u1))
+        )
+        ;; Validations
+        (asserts! (> (len question) u0) ERR-INVALID-QUESTION)
+        ;; Resolution date must be in the future (using block height)
+        (asserts! (> resolution-date block-height) ERR-INVALID-DATE)
+        
+        ;; Create market
+        (map-insert markets new-id {
+            question: question,
+            creator: tx-sender,
+            resolution-date: resolution-date,
+            status: STATUS-ACTIVE,
+            outcome: none,
+            created-at: block-height
+        })
+        
+        ;; Initialize market pool
+        (map-insert market-pools new-id {
+            yes-pool: u0,
+            no-pool: u0,
+            total-yes-tokens: u0,
+            total-no-tokens: u0
+        })
+        
+        ;; Update counter
+        (var-set market-counter new-id)
+        
+        (ok new-id)
+    )
+)
