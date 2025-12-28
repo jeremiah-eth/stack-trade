@@ -52,6 +52,27 @@
     }
 )
 
+;; User positions: market-id + user -> balance data
+(define-map user-positions
+    {
+        market-id: uint,
+        user: principal,
+    }
+    {
+        yes-balance: uint,
+        no-balance: uint,
+    }
+)
+
+;; Market stats: market-id -> volume data
+(define-map market-stats
+    uint
+    {
+        volume: uint,
+        tx-count: uint,
+    }
+)
+
 ;; ============================================
 ;; INITIALIZATION
 ;; ============================================
@@ -64,16 +85,16 @@
 ;; ============================================
 
 ;; Create a new prediction market
-(define-public (create-market (question (string-ascii 256)) (resolution-date uint))
-    (let
-        (
-            (new-id (+ (var-get market-counter) u1))
-        )
+(define-public (create-market
+        (question (string-ascii 256))
+        (resolution-date uint)
+    )
+    (let ((new-id (+ (var-get market-counter) u1)))
         ;; Validations
         (asserts! (> (len question) u0) ERR-INVALID-QUESTION)
         ;; Resolution date must be in the future (using block height)
         (asserts! (> resolution-date block-height) ERR-INVALID-DATE)
-        
+
         ;; Create market
         (map-insert markets new-id {
             question: question,
@@ -81,20 +102,26 @@
             resolution-date: resolution-date,
             status: STATUS-ACTIVE,
             outcome: none,
-            created-at: block-height
+            created-at: block-height,
         })
-        
+
         ;; Initialize market pool
         (map-insert market-pools new-id {
             yes-pool: u0,
             no-pool: u0,
             total-yes-tokens: u0,
-            total-no-tokens: u0
+            total-no-tokens: u0,
         })
-        
+
+        ;; Initialize market stats
+        (map-insert market-stats new-id {
+            volume: u0,
+            tx-count: u0,
+        })
+
         ;; Update counter
         (var-set market-counter new-id)
-        
+
         (ok new-id)
     )
 )
