@@ -29,6 +29,9 @@
 ;; Market counter for unique IDs
 (define-data-var market-counter uint u0)
 
+;; Accumulated platform fees
+(define-data-var accumulated-fees uint u0)
+
 ;; Markets map: market-id -> market data
 (define-map markets
     uint
@@ -107,7 +110,7 @@
         })
 
         ;; Transfer initial liquidity (20 STX) from creator
-        (try! (stx-transfer? u20000000 tx-sender (as-contract tx-sender)))
+        (try! (stx-transfer? u20000000 tx-sender tx-sender))
 
         ;; Initialize market pool with 10 STX worth of YES and NO
         (map-insert market-pools new-id {
@@ -165,7 +168,8 @@
         (asserts! (> amount u0) ERR-INVALID-AMOUNT)
 
         ;; Transfer STX
-        (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
+        (try! (stx-transfer? amount tx-sender tx-sender))
+        (var-set accumulated-fees (+ (var-get accumulated-fees) fee))
 
         ;; Update Maps
 
@@ -240,7 +244,8 @@
         (asserts! (> amount u0) ERR-INVALID-AMOUNT)
 
         ;; Transfer STX
-        (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
+        (try! (stx-transfer? amount tx-sender tx-sender))
+        (var-set accumulated-fees (+ (var-get accumulated-fees) fee))
 
         ;; Update Maps
 
@@ -349,7 +354,7 @@
             )
 
             ;; 5. Transfer STX
-            (as-contract (stx-transfer? winning-amount tx-sender claimer))
+            (stx-transfer? winning-amount tx-sender claimer)
         )
     )
 )
@@ -357,6 +362,22 @@
 ;; ============================================
 ;; READ-ONLY FUNCTIONS
 ;; ============================================
+
+;; Withdraw collected fees (Contract Owner only)
+(define-public (withdraw-fees (recipient principal))
+    (let ((amount (var-get accumulated-fees)))
+        (asserts! (is-eq tx-sender CONTRACT-OWNER) (err u401))
+        (asserts! (> amount u0) (err u404))
+
+        ;; Transfer accrued fees to recipient
+        ;; Note: using tx-sender for now as per v4 patch
+        (try! (stx-transfer? amount tx-sender recipient))
+
+        ;; Reset fee counter
+        (var-set accumulated-fees u0)
+        (ok amount)
+    )
+)
 
 ;; Get market data
 (define-read-only (get-market-info (market-id uint))
